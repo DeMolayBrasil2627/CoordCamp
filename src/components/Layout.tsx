@@ -6,15 +6,20 @@ import {
   Menu, 
   X,
   ExternalLink,
-  ChevronRight
+  ChevronRight,
+  LogOut,
+  Users
 } from 'lucide-react';
 import { User } from '../types';
-import { emblemaGNLogo } from '../data';
+import { emblemaGNLogo, canAccessUserManagement } from '../data';
+
+export type NavTab = 'dashboard' | 'new-correction' | 'users';
 
 interface LayoutProps {
   currentUser: User;
-  activeTab: 'dashboard' | 'new-correction';
-  onNavigate: (tab: 'dashboard' | 'new-correction') => void;
+  activeTab: NavTab;
+  onNavigate: (tab: NavTab) => void;
+  onLogout: () => void;
   children: React.ReactNode;
 }
 
@@ -22,6 +27,7 @@ export const Layout: React.FC<LayoutProps> = ({
   currentUser,
   activeTab,
   onNavigate,
+  onLogout,
   children,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -124,6 +130,28 @@ export const Layout: React.FC<LayoutProps> = ({
               {activeTab === 'new-correction' && <ChevronRight className="w-4 h-4 text-indigo-200" />}
             </button>
 
+            {canAccessUserManagement(currentUser) && (
+              <button
+                onClick={() => {
+                  onNavigate('users');
+                  setMobileMenuOpen(false);
+                }}
+                className={`w-full flex items-center justify-between px-3.5 py-3 rounded-xl font-medium text-sm transition-all duration-200 group ${
+                  activeTab === 'users'
+                    ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-md shadow-indigo-200'
+                    : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <Users className={`w-5 h-5 transition-transform group-hover:scale-110 ${
+                    activeTab === 'users' ? 'text-white' : 'text-slate-400 group-hover:text-slate-600'
+                  }`} />
+                  <span>Gestão de Usuários</span>
+                </div>
+                {activeTab === 'users' && <ChevronRight className="w-4 h-4 text-indigo-200" />}
+              </button>
+            )}
+
             {/* Presentation helper banner in sidebar */}
             <div className="pt-6 px-1">
               <div className="p-3.5 rounded-2xl bg-gradient-to-br from-indigo-50/70 to-violet-50/50 border border-indigo-100/70">
@@ -144,20 +172,32 @@ export const Layout: React.FC<LayoutProps> = ({
 
           {/* User Profile Card at Sidebar Bottom */}
           <div className="p-4 border-t border-slate-100 bg-slate-50/60">
-            <div className="flex items-center gap-3 p-2 rounded-xl bg-white border border-slate-200/70 shadow-sm">
-              <div className="relative">
+            <div className="flex items-center gap-3 p-2.5 rounded-xl bg-white border border-slate-200/70 shadow-sm">
+              <div className="relative flex-shrink-0">
                 <img
                   src={currentUser.avatarUrl}
                   alt={currentUser.name}
-                  className="w-10 h-10 rounded-full object-cover ring-2 ring-indigo-500/20"
+                  className="w-10 h-10 rounded-full object-contain bg-slate-50 p-1 ring-2 ring-indigo-500/20"
                 />
                 <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-white rounded-full"></span>
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-bold text-slate-900 truncate">{currentUser.name}</p>
                 <p className="text-[11px] font-semibold text-indigo-600 truncate">{currentUser.role}</p>
-                <p className="text-[10px] text-slate-400 truncate">{currentUser.email}</p>
+                <p className="text-[10px] text-slate-400 truncate">
+                  SISDMID: {currentUser.sisdmid}
+                  {currentUser.states && currentUser.states.length > 0
+                    ? ` • UF: ${currentUser.states.join(', ')}`
+                    : ''}
+                </p>
               </div>
+              <button
+                onClick={onLogout}
+                title="Sair da conta"
+                className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
             </div>
           </div>
         </div>
@@ -179,7 +219,11 @@ export const Layout: React.FC<LayoutProps> = ({
             <span className="text-slate-400">Castelos & Campanhas</span>
             <span className="text-slate-300">/</span>
             <span className="text-slate-800 font-semibold capitalize">
-              {activeTab === 'dashboard' ? 'Painel de Controle' : 'Lançamento de Avaliação'}
+              {activeTab === 'dashboard'
+                ? 'Painel de Controle'
+                : activeTab === 'new-correction'
+                ? 'Lançamento de Avaliação'
+                : 'Gestão de Usuários & Cargos'}
             </span>
           </div>
 

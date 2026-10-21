@@ -1,38 +1,84 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   PlusCircle, 
   CheckCircle2, 
   Loader2, 
   ArrowLeft, 
   Sparkles,
-  AlertCircle
+  AlertCircle,
+  UserCheck
 } from 'lucide-react';
-import { Correction, CorrectionStatus } from '../types';
-import { availableCampaigns, brazilianStates, getCampaignLogo } from '../data';
+import { Correction, CorrectionStatus, User } from '../types';
+import { availableCampaigns, brazilianStates, getCampaignLogo, getCampaignEntityLabels } from '../data';
 
 interface NewCorrectionProps {
-  onSaveCorrection: (newCorrection: Correction) => void;
+  currentUser: User;
+  users: User[];
+  onSaveCorrection: (newCorrection: Correction) => Promise<Correction> | void;
   onNavigateToDashboard: () => void;
 }
 
 export const NewCorrection: React.FC<NewCorrectionProps> = ({
+  currentUser,
+  users,
   onSaveCorrection,
   onNavigateToDashboard,
 }) => {
+  const isCampaignRestricted =
+    (currentUser.roleType === 'Coordenador Geral' || currentUser.roleType === 'Coordenador') &&
+    Boolean(currentUser.campaign);
+
+  const canAssignCoordinator =
+    currentUser.roleType === 'Admin Master' ||
+    currentUser.roleType === 'MCN' ||
+    currentUser.roleType === 'Secretário' ||
+    currentUser.roleType === 'Coordenador Geral';
+
+  const allowedStates =
+    currentUser.roleType === 'Coordenador' &&
+    currentUser.states &&
+    currentUser.states.length > 0
+      ? currentUser.states
+      : brazilianStates;
+
   // Form state
-  const [campaign, setCampaign] = useState(availableCampaigns[0]);
+  const [campaign, setCampaign] = useState(
+    isCampaignRestricted && currentUser.campaign ? currentUser.campaign : availableCampaigns[0]
+  );
   const [activity, setActivity] = useState('');
   const [castleName, setCastleName] = useState('');
   const [castleNumber, setCastleNumber] = useState<string>('');
-  const [state, setState] = useState(brazilianStates[0]);
+  const [state, setState] = useState(allowedStates[0] || brazilianStates[0]);
   const [score, setScore] = useState<string>('9.0');
   const [status, setStatus] = useState<CorrectionStatus>('Aprovada');
+  const [assignedToSisdmid, setAssignedToSisdmid] = useState<string>(
+    currentUser.roleType === 'Coordenador' ? currentUser.sisdmid : ''
+  );
   const [evaluatorNotes, setEvaluatorNotes] = useState('');
+
+  // Coordenadores disponíveis para a campanha selecionada
+  const campaignCoordinators = useMemo(() => {
+    return users.filter(
+      (u) =>
+        (u.roleType === 'Coordenador' || u.roleType === 'Coordenador Geral') &&
+        u.campaign === campaign
+    );
+  }, [users, campaign]);
+
+  useEffect(() => {
+    if (currentUser.roleType === 'Coordenador') {
+      setAssignedToSisdmid(currentUser.sisdmid);
+    } else {
+      setAssignedToSisdmid('');
+    }
+  }, [campaign, currentUser]);
 
   // UI state
   const [isLoading, setIsLoading] = useState(false);
   const [successData, setSuccessData] = useState<Correction | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
+
+  const entityLabels = getCampaignEntityLabels(campaign);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,14 +98,20 @@ export const NewCorrection: React.FC<NewCorrectionProps> = ({
 
     const numCastle = parseInt(castleNumber, 10);
     if (isNaN(numCastle) || numCastle <= 0) {
-      setErrorMessage('O número do castelo deve ser um valor positivo válido.');
+      setErrorMessage(`O ${entityLabels.numberLabel.toLowerCase()} deve ser um valor positivo válido.`);
       return;
     }
 
-    // Simulate loading for 1 second
+    // Save to DB / state
     setIsLoading(true);
 
-    setTimeout(() => {
+    const assignedUser =
+      currentUser.roleType === 'Coordenador'
+        ? currentUser
+        : users.find((u) => u.sisdmid === assignedToSisdmid);
+
+    setTimeout(async () => {
+      const nowIso = new Date().toISOString();
       const createdItem: Correction = {
         id: `cor-${Date.now()}`,
         campaign,
@@ -69,12 +121,16 @@ export const NewCorrection: React.FC<NewCorrectionProps> = ({
         state,
         score: parseFloat(numScore.toFixed(1)),
         status,
-        createdAt: new Date().toISOString().split('T')[0],
+        createdAt: nowIso.split('T')[0],
+        updatedAt: nowIso,
+        updatedBy: currentUser.name,
+        assignedTo: assignedUser?.sisdmid,
+        assignedToName: assignedUser?.name,
         evaluatorNotes: evaluatorNotes.trim() || 'Avaliação registrada via painel de coordenação.',
       };
 
-      // Add to main state
-      onSaveCorrection(createdItem);
+      // Add to main state / DB
+      const savedResult = await onSaveCorrection(createdItem);
 
       // Reset form fields
       setActivity('');
@@ -86,8 +142,8 @@ export const NewCorrection: React.FC<NewCorrectionProps> = ({
 
       // Show success screen
       setIsLoading(false);
-      setSuccessData(createdItem);
-    }, 1000);
+      setSuccessData(savedResult || createdItem);
+    }, 500);
   };
 
   const handleResetForAnother = () => {
@@ -222,10 +278,14 @@ export const NewCorrection: React.FC<NewCorrectionProps> = ({
                     <select
                       value={campaign}
                       onChange={(e) => setCampaign(e.target.value)}
-                      className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white text-slate-800 transition-all font-medium"
+                      disabled={isCampaignRestricted}
+                      className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white text-slate-800 transition-all font-medium disabled:opacity-75 disabled:cursor-not-allowed"
                       required
                     >
-                      {availableCampaigns.map((camp) => (
+                      {(isCampaignRestricted && currentUser.campaign
+                        ? [currentUser.campaign]
+                        : availableCampaigns
+                      ).map((camp) => (
                         <option key={camp} value={camp}>
                           {camp}
                         </option>
@@ -249,25 +309,56 @@ export const NewCorrection: React.FC<NewCorrectionProps> = ({
                   />
                 </div>
               </div>
+
+              {/* Atribuição de Coordenador da Campanha */}
+              {canAssignCoordinator && (
+                <div className="p-4 rounded-2xl bg-indigo-50/50 border border-indigo-100">
+                  <label className="block text-xs font-bold text-indigo-950 mb-1.5 flex items-center gap-1.5">
+                    <UserCheck className="w-4 h-4 text-indigo-600" />
+                    <span>Atribuir Atividade a um Coordenador ({campaign})</span>
+                  </label>
+                  <select
+                    value={assignedToSisdmid}
+                    onChange={(e) => setAssignedToSisdmid(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 font-medium"
+                  >
+                    <option value="">Sem atribuição específica (Geral da Campanha)</option>
+                    {campaignCoordinators.map((coord) => (
+                      <option key={coord.id} value={coord.sisdmid}>
+                        {coord.name} ({coord.roleType}
+                        {coord.states && coord.states.length > 0
+                          ? ` [UFs: ${coord.states.join(', ')}]`
+                          : ''}{' '}
+                        - SISDMID: {coord.sisdmid})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    {campaignCoordinators.length > 0
+                      ? 'O coordenador selecionado verá esta atividade em seu painel de atividades.'
+                      : 'Nenhum coordenador cadastrado para esta campanha ainda. Cadastre em "Gestão de Usuários".'}
+                  </p>
+                </div>
+              )}
             </div>
 
             <hr className="border-slate-100" />
 
-            {/* Castle Data Section */}
+            {/* Entity Data Section */}
             <div className="space-y-4">
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                2. Dados do Castelo
+                {entityLabels.sectionTitle}
               </h3>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                {/* Nome do Castelo (Text) */}
+                {/* Nome (Text) */}
                 <div className="md:col-span-1">
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Nome do Castelo *
+                    {entityLabels.nameLabel} *
                   </label>
                   <input
                     type="text"
-                    placeholder="Ex: Castelo da Luz"
+                    placeholder={entityLabels.namePlaceholder}
                     value={castleName}
                     onChange={(e) => setCastleName(e.target.value)}
                     className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white text-slate-800 transition-all placeholder-slate-400"
@@ -278,11 +369,11 @@ export const NewCorrection: React.FC<NewCorrectionProps> = ({
                 {/* Número (Number) */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Número do Castelo *
+                    {entityLabels.numberLabel} *
                   </label>
                   <input
                     type="number"
-                    placeholder="Ex: 12"
+                    placeholder={entityLabels.numberPlaceholder}
                     min="1"
                     value={castleNumber}
                     onChange={(e) => setCastleNumber(e.target.value)}
@@ -302,7 +393,7 @@ export const NewCorrection: React.FC<NewCorrectionProps> = ({
                     className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white text-slate-800 transition-all font-medium"
                     required
                   >
-                    {brazilianStates.map((uf) => (
+                    {allowedStates.map((uf) => (
                       <option key={uf} value={uf}>
                         {uf}
                       </option>

@@ -12,39 +12,139 @@ import {
   FileText,
   MapPin,
   Info,
-  X
+  X,
+  Save,
+  UserCheck,
+  Trash2
 } from 'lucide-react';
-import { Correction, CorrectionStatus } from '../types';
+import { Correction, CorrectionStatus, User } from '../types';
 import { getCampaignLogo } from '../data';
 
 interface DashboardProps {
   corrections: Correction[];
+  currentUser: User;
+  users: User[];
   onNavigateToNew: () => void;
+  onUpdateCorrection: (updatedCorrection: Correction) => void;
+  onDeleteCorrection: (correctionId: string) => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ 
   corrections, 
-  onNavigateToNew 
+  currentUser,
+  users,
+  onNavigateToNew,
+  onUpdateCorrection,
+  onDeleteCorrection
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('Todos');
   const [selectedCorrection, setSelectedCorrection] = useState<Correction | null>(null);
+  const [editScore, setEditScore] = useState<string>('0.0');
+  const [editStatus, setEditStatus] = useState<CorrectionStatus>('Aprovada');
+  const [editAssignedTo, setEditAssignedTo] = useState<string>('');
+  const [editError, setEditError] = useState<string>('');
 
-  // Computed metrics
+  const canAssignCoordinator =
+    currentUser.roleType === 'Admin Master' ||
+    currentUser.roleType === 'MCN' ||
+    currentUser.roleType === 'Secretário' ||
+    currentUser.roleType === 'Coordenador Geral';
+
+  const handleOpenModal = (item: Correction) => {
+    setSelectedCorrection(item);
+    setEditScore(item.score.toFixed(1));
+    setEditStatus(item.status);
+    setEditAssignedTo(item.assignedTo || '');
+    setEditError('');
+  };
+
+  const handleSaveEdit = () => {
+    if (!selectedCorrection) return;
+
+    const numScore = parseFloat(editScore);
+    if (isNaN(numScore) || numScore < 0 || numScore > 10) {
+      setEditError('A nota deve ser um valor entre 0.0 e 10.0.');
+      return;
+    }
+
+    const assignedUser = users.find((u) => u.sisdmid === editAssignedTo);
+
+    const updatedItem: Correction = {
+      ...selectedCorrection,
+      score: parseFloat(numScore.toFixed(1)),
+      status: editStatus,
+      assignedTo: canAssignCoordinator
+        ? assignedUser?.sisdmid
+        : selectedCorrection.assignedTo,
+      assignedToName: canAssignCoordinator
+        ? assignedUser?.name
+        : selectedCorrection.assignedToName,
+      updatedAt: new Date().toISOString(),
+      updatedBy: currentUser.name,
+    };
+
+    onUpdateCorrection(updatedItem);
+    setSelectedCorrection(null);
+  };
+
+  const handleDeleteCurrent = () => {
+    if (!selectedCorrection) return;
+    onDeleteCorrection(selectedCorrection.id);
+    setSelectedCorrection(null);
+  };
+
+  const formatLastModified = (isoDate: string) => {
+    const dateObj = new Date(isoDate);
+    if (isNaN(dateObj.getTime())) {
+      return { date: isoDate, time: '--:--' };
+    }
+    return {
+      date: dateObj.toLocaleDateString('pt-BR'),
+      time: dateObj.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+    };
+  };
+
+  // Filtra correções conforme o cargo (Role-Based Access Control)
+  const roleScopedCorrections = useMemo(() => {
+    if (
+      currentUser.roleType === 'Admin Master' ||
+      currentUser.roleType === 'MCN' ||
+      currentUser.roleType === 'Secretário'
+    ) {
+      return corrections;
+    }
+
+    if (currentUser.roleType === 'Coordenador Geral') {
+      return corrections.filter((c) => c.campaign === currentUser.campaign);
+    }
+
+    // Coordenador de X campanha: vê as atividades atribuídas a ele, registradas por ele ou do(s) estado(s) que coordena na sua campanha
+    return corrections.filter(
+      (c) =>
+        c.campaign === currentUser.campaign &&
+        (c.assignedTo === currentUser.sisdmid ||
+          c.assignedToName === currentUser.name ||
+          c.updatedBy === currentUser.name ||
+          (currentUser.states && currentUser.states.includes(c.state)))
+    );
+  }, [corrections, currentUser]);
+
+  // Computed metrics baseados no escopo de visibilidade do usuário
   const stats = useMemo(() => {
-    const total = corrections.length;
-    const pending = corrections.filter(c => c.status === 'Aguardando Revisão').length;
-    const approved = corrections.filter(c => c.status === 'Aprovada').length;
+    const total = roleScopedCorrections.length;
+    const pending = roleScopedCorrections.filter(c => c.status === 'Aguardando Revisão').length;
+    const approved = roleScopedCorrections.filter(c => c.status === 'Aprovada').length;
     const averageScore = total > 0 
-      ? (corrections.reduce((acc, curr) => acc + curr.score, 0) / total).toFixed(1)
+      ? (roleScopedCorrections.reduce((acc, curr) => acc + curr.score, 0) / total).toFixed(1)
       : '0.0';
 
     return { total, pending, approved, averageScore };
-  }, [corrections]);
+  }, [roleScopedCorrections]);
 
   // Filtered corrections
   const filteredCorrections = useMemo(() => {
-    return corrections.filter(item => {
+    return roleScopedCorrections.filter(item => {
       const matchesSearch = 
         item.castleName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.campaign.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -55,7 +155,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       return matchesSearch && matchesStatus;
     });
-  }, [corrections, searchTerm, statusFilter]);
+  }, [roleScopedCorrections, searchTerm, statusFilter]);
 
   // Helper for status badge styling
   const renderStatusBadge = (status: CorrectionStatus) => {
@@ -255,7 +355,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <tr 
                     key={item.id}
                     className="hover:bg-indigo-50/30 transition-colors group cursor-pointer"
-                    onClick={() => setSelectedCorrection(item)}
+                    onClick={() => handleOpenModal(item)}
                   >
                     {/* Castle Name and Number */}
                     <td className="py-4 px-6">
@@ -294,6 +394,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           <p className="text-xs text-slate-500 truncate mt-0.5" title={item.activity}>
                             {item.activity}
                           </p>
+                          {item.assignedToName && (
+                            <p className="text-[11px] text-indigo-600 font-semibold mt-0.5 flex items-center gap-1">
+                              <UserCheck className="w-3 h-3" />
+                              <span>Atribuído: {item.assignedToName}</span>
+                            </p>
+                          )}
                         </div>
                       </div>
                     </td>
@@ -320,7 +426,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          setSelectedCorrection(item);
+                          handleOpenModal(item);
                         }}
                         className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100/80 px-2.5 py-1.5 rounded-lg transition-colors"
                       >
@@ -347,7 +453,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
         {/* Table Footer */}
         <div className="px-6 py-3.5 bg-slate-50/50 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-          <span>Exibindo <strong>{filteredCorrections.length}</strong> de <strong>{corrections.length}</strong> correções cadastradas</span>
+          <span>Exibindo <strong>{filteredCorrections.length}</strong> de <strong>{roleScopedCorrections.length}</strong> correções visíveis para {currentUser.role}</span>
           <span className="text-[11px] text-slate-400 italic">Atualizado recentemente</span>
         </div>
       </div>
@@ -396,23 +502,81 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-100">
+              {editError && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{editError}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-100">
                 <div>
-                  <p className="text-xs font-semibold text-slate-400">Nota Final</p>
-                  <div className="mt-1 flex items-center gap-2">
-                    <span className={`text-base font-extrabold px-3 py-1 rounded-lg border ${getScoreBadgeClass(selectedCorrection.score)}`}>
-                      {selectedCorrection.score.toFixed(1)}
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">
+                    Nota Final (0.0 a 10.0)
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      max="10"
+                      value={editScore}
+                      onChange={(e) => setEditScore(e.target.value)}
+                      className="w-28 px-3 py-2 text-sm font-extrabold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white text-slate-900 transition-all"
+                    />
+                    <span className={`text-xs font-extrabold px-2.5 py-1 rounded-lg border ${getScoreBadgeClass(parseFloat(editScore) || 0)}`}>
+                      {(parseFloat(editScore) || 0).toFixed(1)} / 10.0
                     </span>
-                    <span className="text-xs text-slate-400">de 10.0</span>
                   </div>
                 </div>
                 <div>
-                  <p className="text-xs font-semibold text-slate-400">Status Atual</p>
-                  <div className="mt-1">
-                    {renderStatusBadge(selectedCorrection.status)}
-                  </div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">
+                    Status da Avaliação
+                  </label>
+                  <select
+                    value={editStatus}
+                    onChange={(e) => setEditStatus(e.target.value as CorrectionStatus)}
+                    className="w-full px-3 py-2 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white text-slate-800 transition-all"
+                  >
+                    <option value="Aprovada">Aprovada</option>
+                    <option value="Devolvida">Devolvida</option>
+                    <option value="Recusada">Recusada</option>
+                    <option value="Aguardando Revisão">Aguardando Revisão</option>
+                  </select>
                 </div>
               </div>
+
+              {/* Atribuição de Coordenador da Campanha no Modal */}
+              {canAssignCoordinator && (
+                <div className="pt-2 border-t border-slate-100">
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5 flex items-center gap-1.5">
+                    <UserCheck className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>Coordenador Responsável ({selectedCorrection.campaign})</span>
+                  </label>
+                  <select
+                    value={editAssignedTo}
+                    onChange={(e) => setEditAssignedTo(e.target.value)}
+                    className="w-full px-3 py-2 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white text-slate-800 transition-all"
+                  >
+                    <option value="">Sem atribuição específica (Geral da Campanha)</option>
+                    {users
+                      .filter(
+                        (u) =>
+                          (u.roleType === 'Coordenador' || u.roleType === 'Coordenador Geral') &&
+                          u.campaign === selectedCorrection.campaign
+                      )
+                      .map((coord) => (
+                        <option key={coord.id} value={coord.sisdmid}>
+                          {coord.name} ({coord.roleType}
+                          {coord.states && coord.states.length > 0
+                            ? ` [UFs: ${coord.states.join(', ')}]`
+                            : ''}{' '}
+                          - SISDMID: {coord.sisdmid})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
 
               <div className="pt-2 border-t border-slate-100">
                 <p className="text-xs font-semibold text-slate-400 flex items-center gap-1.5">
@@ -423,15 +587,55 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   {selectedCorrection.evaluatorNotes || 'Nenhuma observação informada.'}
                 </div>
               </div>
+
+              {/* Última Modificação Info */}
+              <div className="pt-2 border-t border-slate-100">
+                <div className="p-3 rounded-xl bg-indigo-50/50 border border-indigo-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2 text-slate-600">
+                    <Clock className="w-4 h-4 text-indigo-500 flex-shrink-0" />
+                    <span>
+                      Última modificação em{' '}
+                      <strong className="text-slate-800">
+                        {formatLastModified(selectedCorrection.updatedAt).date}
+                      </strong>{' '}
+                      às{' '}
+                      <strong className="text-slate-800">
+                        {formatLastModified(selectedCorrection.updatedAt).time}
+                      </strong>
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-indigo-700 font-semibold">
+                    <UserCheck className="w-3.5 h-3.5" />
+                    <span>Coord. {selectedCorrection.updatedBy}</span>
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <div className="pt-4 border-t border-slate-100 flex justify-end">
+            <div className="pt-4 border-t border-slate-100 flex items-center justify-between gap-2.5">
               <button
-                onClick={() => setSelectedCorrection(null)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-900 text-white hover:bg-slate-800 transition-colors"
+                onClick={handleDeleteCurrent}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 transition-colors cursor-pointer"
               >
-                Fechar
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Excluir Avaliação</span>
               </button>
+
+              <div className="flex items-center gap-2.5">
+                <button
+                  onClick={() => setSelectedCorrection(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleSaveEdit}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm shadow-indigo-200 transition-all cursor-pointer"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Salvar Alterações</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -3,13 +3,22 @@ import { Correction, CorrectionStatus, RoleType, User } from '../types';
 import { currentUser as masterAdminUser, emblemaGNLogo, formatUserRoleLabel } from '../data';
 
 const rawUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
-const supabaseUrl = rawUrl.replace(/\/rest\/v1\/?$/, '');
+const cleanSupabaseUrl = rawUrl.replace(/\/rest\/v1\/?$/, '');
 const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
 
-export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+export const isSupabaseConfigured = Boolean(cleanSupabaseUrl && supabaseAnonKey);
+
+// Se estiver rodando no navegador em modo DEV com uma chave sb_secret_, usa o proxy do Vite
+// para evitar o bloqueio "Forbidden use of secret API key in browser" do Supabase.
+const effectiveSupabaseUrl =
+  import.meta.env.DEV &&
+  typeof window !== 'undefined' &&
+  supabaseAnonKey.startsWith('sb_secret_')
+    ? `${window.location.origin}/supabase-proxy`
+    : cleanSupabaseUrl;
 
 export const supabase = isSupabaseConfigured
-  ? createClient(supabaseUrl, supabaseAnonKey)
+  ? createClient(effectiveSupabaseUrl, supabaseAnonKey)
   : null;
 
 interface DbCorrectionRow {
@@ -38,6 +47,7 @@ interface DbUserRow {
   role_type?: RoleType;
   campaign?: string | null;
   states?: string[] | null;
+  activities?: string[] | null;
 }
 
 const inferRoleType = (row: DbUserRow): RoleType => {
@@ -53,6 +63,8 @@ const mapRowToUser = (row: DbUserRow): User => {
   const roleType = inferRoleType(row);
   const campaign = row.campaign ?? undefined;
   const states = row.states && row.states.length > 0 ? row.states : undefined;
+  const activities =
+    row.activities && row.activities.length > 0 ? row.activities : undefined;
   return {
     id: row.id,
     sisdmid: row.sisdmid,
@@ -63,6 +75,7 @@ const mapRowToUser = (row: DbUserRow): User => {
     roleType,
     campaign,
     states,
+    activities,
     avatarUrl: emblemaGNLogo,
   };
 };
@@ -147,22 +160,91 @@ export const insertUserInDb = async (
 ): Promise<User | null> => {
   if (!supabase) return null;
 
+  const payloadWithActivities = {
+    sisdmid: newUser.sisdmid,
+    password: newUser.password || '',
+    name: newUser.name,
+    role: newUser.role,
+    role_type: newUser.roleType,
+    campaign: newUser.campaign ?? null,
+    states: newUser.states && newUser.states.length > 0 ? newUser.states : null,
+    activities:
+      newUser.activities && newUser.activities.length > 0
+        ? newUser.activities
+        : null,
+  };
+
   const { data, error } = await supabase
     .from('users')
-    .insert({
-      sisdmid: newUser.sisdmid,
-      password: newUser.password || '',
-      name: newUser.name,
-      role: newUser.role,
-      role_type: newUser.roleType,
-      campaign: newUser.campaign ?? null,
-      states: newUser.states && newUser.states.length > 0 ? newUser.states : null,
-    })
+    .insert(payloadWithActivities)
     .select('*')
     .single();
 
   if (error) {
+    // Fallback caso a coluna 'activities' ainda não tenha sido adicionada no banco Supabase
+    if (error.message?.includes('activities')) {
+      const { activities: _unused, ...payloadWithoutActivities } = payloadWithActivities;
+      const retry = await supabase
+        .from('users')
+        .insert(payloadWithoutActivities)
+        .select('*')
+        .single();
+      if (!retry.error && retry.data) {
+        const mapped = mapRowToUser(retry.data as DbUserRow);
+        mapped.activities = newUser.activities;
+        return mapped;
+      }
+    }
     console.error('Erro ao criar usuário no Supabase:', error.message);
+    throw error;
+  }
+
+  return mapRowToUser(data as DbUserRow);
+};
+
+export const updateUserInDb = async (updatedUser: User): Promise<User | null> => {
+  if (!supabase) return null;
+
+  const payloadWithActivities: Record<string, unknown> = {
+    sisdmid: updatedUser.sisdmid,
+    name: updatedUser.name,
+    role: updatedUser.role,
+    role_type: updatedUser.roleType,
+    campaign: updatedUser.campaign ?? null,
+    states: updatedUser.states && updatedUser.states.length > 0 ? updatedUser.states : null,
+    activities:
+      updatedUser.activities && updatedUser.activities.length > 0
+        ? updatedUser.activities
+        : null,
+  };
+
+  if (updatedUser.password) {
+    payloadWithActivities.password = updatedUser.password;
+  }
+
+  const { data, error } = await supabase
+    .from('users')
+    .update(payloadWithActivities)
+    .eq('id', updatedUser.id)
+    .select('*')
+    .single();
+
+  if (error) {
+    if (error.message?.includes('activities')) {
+      const { activities: _unused, ...payloadWithoutActivities } = payloadWithActivities;
+      const retry = await supabase
+        .from('users')
+        .update(payloadWithoutActivities)
+        .eq('id', updatedUser.id)
+        .select('*')
+        .single();
+      if (!retry.error && retry.data) {
+        const mapped = mapRowToUser(retry.data as DbUserRow);
+        mapped.activities = updatedUser.activities;
+        return mapped;
+      }
+    }
+    console.error('Erro ao atualizar usuário no Supabase:', error.message);
     throw error;
   }
 

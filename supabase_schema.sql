@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS public.users (
   role_type TEXT NOT NULL DEFAULT 'Coordenador',
   campaign TEXT,
   states TEXT[],
+  activities TEXT[],
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -20,6 +21,7 @@ CREATE TABLE IF NOT EXISTS public.users (
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS role_type TEXT NOT NULL DEFAULT 'Coordenador';
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS campaign TEXT;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS states TEXT[];
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS activities TEXT[];
 
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 
@@ -33,6 +35,13 @@ DROP POLICY IF EXISTS "Permitir criação de usuários" ON public.users;
 CREATE POLICY "Permitir criação de usuários"
   ON public.users
   FOR INSERT
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Permitir atualização de usuários" ON public.users;
+CREATE POLICY "Permitir atualização de usuários"
+  ON public.users
+  FOR UPDATE
+  USING (true)
   WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Permitir exclusão de usuários" ON public.users;

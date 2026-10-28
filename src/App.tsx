@@ -13,6 +13,7 @@ import {
   deleteCorrectionFromDb,
   fetchUsersFromDb,
   insertUserInDb,
+  updateUserInDb,
   deleteUserFromDb,
   isSupabaseConfigured,
 } from './lib/supabase';
@@ -51,7 +52,9 @@ export const App: React.FC = () => {
   });
 
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
-  const [corrections, setCorrections] = useState<Correction[]>(initialCorrections);
+  const [corrections, setCorrections] = useState<Correction[]>(
+    isSupabaseConfigured ? [] : initialCorrections
+  );
 
   const saveUsersLocally = (updatedList: User[]) => {
     setUsers(updatedList);
@@ -119,6 +122,30 @@ export const App: React.FC = () => {
     const updated = [...users, newUser];
     saveUsersLocally(updated);
     return newUser;
+  };
+
+  const handleUpdateUser = async (updatedUser: User): Promise<User> => {
+    let savedUser = updatedUser;
+    if (isSupabaseConfigured) {
+      try {
+        const updatedInDb = await updateUserInDb(updatedUser);
+        if (updatedInDb) {
+          savedUser = updatedInDb;
+        }
+      } catch (err) {
+        console.warn('Atualizando usuário localmente (fallback):', err);
+      }
+    }
+
+    const updatedList = users.map((u) => (u.id === savedUser.id ? savedUser : u));
+    saveUsersLocally(updatedList);
+
+    if (loggedUser && loggedUser.id === savedUser.id) {
+      setLoggedUser(savedUser);
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(savedUser));
+    }
+
+    return savedUser;
   };
 
   const handleDeleteUser = async (userId: string): Promise<void> => {
@@ -215,6 +242,7 @@ export const App: React.FC = () => {
           currentUser={loggedUser}
           users={users}
           onCreateUser={handleCreateUser}
+          onUpdateUser={handleUpdateUser}
           onDeleteUser={handleDeleteUser}
         />
       )}

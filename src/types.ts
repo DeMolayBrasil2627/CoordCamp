@@ -17,6 +17,7 @@ export interface User {
   roleType: RoleType;
   campaign?: string;
   states?: string[];
+  activities?: string[];
   avatarUrl: string;
 }
 

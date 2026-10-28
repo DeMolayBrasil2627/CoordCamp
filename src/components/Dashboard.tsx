@@ -119,13 +119,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return corrections.filter((c) => c.campaign === currentUser.campaign);
     }
 
-    // Coordenador de X campanha: vê as atividades atribuídas a ele, registradas por ele ou do(s) estado(s) que coordena na sua campanha
+    // Coordenador de X campanha: vê as atividades atribuídas a ele, registradas por ele, das atividades específicas sob sua responsabilidade ou do(s) estado(s) que coordena na sua campanha
     return corrections.filter(
       (c) =>
         c.campaign === currentUser.campaign &&
         (c.assignedTo === currentUser.sisdmid ||
           c.assignedToName === currentUser.name ||
           c.updatedBy === currentUser.name ||
+          (currentUser.activities &&
+            currentUser.activities.some(
+              (act) => act.toLowerCase() === c.activity.trim().toLowerCase()
+            )) ||
           (currentUser.states && currentUser.states.includes(c.state)))
     );
   }, [corrections, currentUser]);
@@ -570,6 +574,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           {coord.name} ({coord.roleType}
                           {coord.states && coord.states.length > 0
                             ? ` [UFs: ${coord.states.join(', ')}]`
+                            : ''}
+                          {coord.activities && coord.activities.length > 0
+                            ? ` [Ativ: ${coord.activities.join(', ')}]`
                             : ''}{' '}
                           - SISDMID: {coord.sisdmid})
                         </option>

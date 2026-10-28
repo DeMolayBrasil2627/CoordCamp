@@ -65,6 +65,34 @@ export const NewCorrection: React.FC<NewCorrectionProps> = ({
     );
   }, [users, campaign]);
 
+  // Mapeia atividades específicas vinculadas a coordenadores da campanha selecionada
+  const campaignActivityLinks = useMemo(() => {
+    const links: { activityName: string; coordinator: User }[] = [];
+    const sourceCoordinators =
+      currentUser.roleType === 'Coordenador' ? [currentUser] : campaignCoordinators;
+
+    sourceCoordinators.forEach((coord) => {
+      if (coord.activities && coord.activities.length > 0) {
+        coord.activities.forEach((act) => {
+          links.push({ activityName: act, coordinator: coord });
+        });
+      }
+    });
+    return links;
+  }, [campaignCoordinators, currentUser]);
+
+  const handleActivityChange = (value: string) => {
+    setActivity(value);
+    if (currentUser.roleType !== 'Coordenador') {
+      const matched = campaignActivityLinks.find(
+        (item) => item.activityName.toLowerCase() === value.trim().toLowerCase()
+      );
+      if (matched) {
+        setAssignedToSisdmid(matched.coordinator.sisdmid);
+      }
+    }
+  };
+
   useEffect(() => {
     if (currentUser.roleType === 'Coordenador') {
       setAssignedToSisdmid(currentUser.sisdmid);
@@ -105,10 +133,14 @@ export const NewCorrection: React.FC<NewCorrectionProps> = ({
     // Save to DB / state
     setIsLoading(true);
 
+    const matchedByActivity = campaignActivityLinks.find(
+      (item) => item.activityName.toLowerCase() === activity.trim().toLowerCase()
+    )?.coordinator;
+
     const assignedUser =
       currentUser.roleType === 'Coordenador'
         ? currentUser
-        : users.find((u) => u.sisdmid === assignedToSisdmid);
+        : users.find((u) => u.sisdmid === assignedToSisdmid) || matchedByActivity;
 
     setTimeout(async () => {
       const nowIso = new Date().toISOString();
@@ -303,10 +335,39 @@ export const NewCorrection: React.FC<NewCorrectionProps> = ({
                     type="text"
                     placeholder="Ex: Doação de Sangue, Oficina de Liderança..."
                     value={activity}
-                    onChange={(e) => setActivity(e.target.value)}
+                    onChange={(e) => handleActivityChange(e.target.value)}
                     className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white text-slate-800 transition-all placeholder-slate-400"
                     required
                   />
+                  {campaignActivityLinks.length > 0 && (
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase">
+                        Atividades de Coordenadores:
+                      </span>
+                      {campaignActivityLinks.map(({ activityName, coordinator }) => {
+                        const isSelected =
+                          activity.trim().toLowerCase() === activityName.toLowerCase();
+                        return (
+                          <button
+                            key={`${coordinator.sisdmid}-${activityName}`}
+                            type="button"
+                            onClick={() => {
+                              setActivity(activityName);
+                              setAssignedToSisdmid(coordinator.sisdmid);
+                            }}
+                            className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold border transition-all cursor-pointer ${
+                              isSelected
+                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                            }`}
+                            title={`Responsável: ${coordinator.name}`}
+                          >
+                            {activityName} ({coordinator.name.split(' ')[0]})
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -328,6 +389,9 @@ export const NewCorrection: React.FC<NewCorrectionProps> = ({
                         {coord.name} ({coord.roleType}
                         {coord.states && coord.states.length > 0
                           ? ` [UFs: ${coord.states.join(', ')}]`
+                          : ''}
+                        {coord.activities && coord.activities.length > 0
+                          ? ` [Ativ: ${coord.activities.join(', ')}]`
                           : ''}{' '}
                         - SISDMID: {coord.sisdmid})
                       </option>

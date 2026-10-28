@@ -196,6 +196,14 @@ export const canDeleteOrManageUser = (actor: User, target: User): boolean => {
   return getRoleHierarchyRank(actor.roleType) > getRoleHierarchyRank(target.roleType);
 };
 
+export const canEditUser = (actor: User, target: User): boolean => {
+  if (actor.roleType === 'Admin Master') return true;
+  if (actor.roleType === 'Coordenador Geral') {
+    return target.roleType === 'Coordenador' && target.campaign === actor.campaign;
+  }
+  return getCreatableRoles(actor).includes(target.roleType);
+};
+
 export const currentUser: User = {
   id: 'usr-001',
   sisdmid: '135126',
